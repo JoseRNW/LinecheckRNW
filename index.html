@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Line Check · Rock n' Wok</title>
+<meta name="theme-color" content="#0c0a09" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" type="image/png" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>html,body{background:#f5f5f4;margin:0;-webkit-tap-highlight-color:transparent}select{-webkit-appearance:none;appearance:none}</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+/* ===== Almacenamiento local (versión GitHub Pages: guarda en este dispositivo) ===== */
+window.storage = {
+  async get(key, shared) { const v = localStorage.getItem((shared ? "s:" : "p:") + key); if (v == null) throw new Error("not found"); return { key, value: v, shared: !!shared }; },
+  async set(key, value, shared) { localStorage.setItem((shared ? "s:" : "p:") + key, value); return { key, value, shared: !!shared }; },
+  async delete(key, shared) { localStorage.removeItem((shared ? "s:" : "p:") + key); return { key, deleted: true, shared: !!shared }; },
+  async list(prefix = "", shared) { const pre = (shared ? "s:" : "p:") + prefix; const keys = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(pre)) keys.push(k.slice(2)); } keys.sort(); return { keys, prefix, shared: !!shared }; },
+};
+if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {})); }
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+/* ===================================================================
+   SINCRONIZACIÓN OPCIONAL A GOOGLE SHEETS (historial multi-dispositivo)
+   Pega aquí la URL de tu Web App de Google Apps Script (ver README.md).
+   Si queda vacío, el historial se guarda solo en este dispositivo.
+=================================================================== */
+const SYNC_URL = "";
+
+const SUCURSALES = ["Explanada", "Vía San Ángel", "UPAEP", "Sonata", "Galerías Serdán", "Parque Puebla", "Outlet Premier", "Angelópolis", "Zócalo"];
+const PUESTOS = ["Guardián", "Tigre", "Dragón"];
+
+/* ============ MUESTREO ALEATORIO DEL DÍA (seed = fecha) ============ */
+function hashStr(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
+function mulberry32(a) { return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function pickN(pool, n, rng) { const p = [...pool], out = []; while (out.length < n && p.length) out.push(p.splice(Math.floor(rng() * p.length), 1)[0]); return out; }
+
+const POOL_SALSAS = ["Salsa Caramel", "Salsa de Soya", "Salsa Habanero Ajo", "Salsa Mushroom", "Salsa Orange", "Salsa Suprema"];
+const POOL_ADEREZOS = ["Aderezo chipotle", "Aderezo habanero", "Aderezo jalapeño", "Tampico"];
+const POOL_CONCENTRADOS = ["Concentrado de mango", "Concentrado de frutos rojos", "Concentrado de maracuyá", "Concentrado de vainilla"];
+const POOL_VEGETALES = ["Apio", "Florete de brócoli", "Cebolla", "Cebollín", "Ejote", "Elote", "Germen de soya", "Pimiento", "Zanahoria stick", "Jengibre"];
+const PROTEINAS = ["Boneless", "Res laminado", "Pollo laminado", "Camarón frito"];
+
+/* ============ DEFINICIÓN DE CONTROLES ============ */
+const CONTROLS = [
+  { id: 1, mod: "linea", block: "Cadena de frío · Producción (arriba)", name: "Cámara de refrigeración", type: "temp", unit: "°C", min: 0, max: 4, crit: "C", blocks: "always" },
+  { id: 2, mod: "linea", block: "Cadena de frío · Producción (arriba)", name: "Congelador", type: "temp", unit: "°C", min: -40, max: -18, crit: "C", blocks: "always", hint: "≤ –18°C · escribe solo el número, el signo negativo es automático", neg: true },
+  { id: 33, mod: "linea", block: "Cadena de frío · Línea", name: "Refrigerador de front", type: "temp", unit: "°C", min: 0, max: 4, crit: "C", blocks: "always" },
+  { id: 34, mod: "linea", block: "Cadena de frío · Línea", name: "Mesa de refrigeración", type: "temp", unit: "°C", min: 0, max: 4, crit: "C", blocks: "always" },
+  { id: 35, mod: "linea", block: "Cadena de frío · Línea", name: "Refrigerador de cajoneras (bajo estufas)", type: "temp", unit: "°C", min: 0, max: 4, crit: "C", blocks: "always", hint: "0–4°C · el más expuesto al calor de estufas" },
+  { id: 5, mod: "linea", block: "Inocuidad y equipos", name: "Proteína fría del día", type: "temp", unit: "°C", min: 0, max: 4, crit: "C", blocks: "always", assigned: "proteina" },
+  { id: 7, mod: "linea", block: "Inocuidad y equipos", name: "Wok automático encendido, operando y línea de gas abierta", type: "check", crit: "C", blocks: "always" },
+  { id: 8, mod: "linea", block: "Inocuidad y equipos", name: "Freidora · cambio de filtro", type: "photo", crit: "I", blocks: null },
+  { id: 36, mod: "linea", block: "Inocuidad y equipos", name: "Freidora · filtrado realizado", type: "check", crit: "I", blocks: null, okText: "Realizado", failText: "No realizado" },
+  { id: 9, mod: "linea", block: "Inocuidad y equipos", name: "Hielo íntegro, hielera llena, sin olores", type: "check", crit: "I", blocks: null },
+  { id: 10, mod: "linea", block: "Disponibilidad · Proteínas", name: "Boneless preparado", type: "stock", unit: "kg", min: 12, crit: "C", blocks: "stock70" },
+  { id: 37, mod: "linea", block: "Disponibilidad · Proteínas", name: "Pollo laminado", type: "stock", unit: "kg", min: 8, crit: "C", blocks: "stock70" },
+  { id: 12, mod: "linea", block: "Disponibilidad · Proteínas", name: "Res laminado", type: "stock", unit: "kg", min: 6, crit: "I", blocks: null },
+  { id: 13, mod: "linea", block: "Disponibilidad · Proteínas", name: "Camarón frito", type: "stock", unit: "kg", min: 4, crit: "I", blocks: null },
+  { id: 11, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Arroz al vapor disponible", type: "stock", unit: "recetas", min: 3, crit: "C", blocks: "stock70", hint: "1 receta ≈ kg definidos por estándar (calibrar por sucursal)" },
+  { id: 15, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Arroz frito (del día)", type: "stock", unit: "recetas", min: 6, crit: "I", blocks: null },
+  { id: 16, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Noodles", type: "stock", unit: "recetas", min: 6, crit: "I", blocks: null },
+  { id: 17, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Rockshiages · unidades por tipo", type: "multicount", items: ["Tocino", "Cangrejo", "Papa", "Vainilla", "Oreo", "Limón"], minEach: 8, unit: "uds", crit: "I", blocks: null },
+  { id: 18, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Pulpa de guacamole · frescura y cantidad", type: "checkfoto", crit: "I", blocks: null },
+  { id: 19, mod: "linea", block: "Montaje y calidad", name: "Estación fría / vegetales montada", type: "photo", crit: "I", blocks: null },
+  { id: 20, mod: "linea", block: "Montaje y calidad", name: "Estación wok montada (salsas + slurry)", type: "photo", crit: "I", blocks: null },
+  { id: 21, mod: "linea", block: "Montaje y calidad", name: "Prueba sensorial del día", type: "muestreo", crit: "I", blocks: null, assigned: "sensorial", okLabel: "Al estándar", failLabel: "✕", hint: "Aleatorio: 1 salsa, 1 aderezo, 1 concentrado y 3 vegetales · las 4 proteínas se prueban siempre" },
+  { id: 22, mod: "linea", block: "Montaje y calidad", name: "Estación bebidas montada", type: "photo", crit: "M", blocks: null },
+  { id: 23, mod: "linea", block: "Montaje y calidad", name: "Packing / delivery con insumos (≥3 hrs)", type: "photo", crit: "I", blocks: null },
+  { id: 24, mod: "linea", block: "Montaje y calidad", name: "Limpieza general de línea y pisos", type: "photo", crit: "M", blocks: null },
+  { id: 25, mod: "front", block: "Sistemas", name: "POS operando + fondo de caja", type: "pos", unit: "$", crit: "C", blocks: "always" },
+  { id: 26, mod: "front", block: "Sistemas", name: "Canales delivery en línea, menú activo", type: "canales", items: ["Rappi", "Uber Eats", "Didi"], crit: "C", blocks: "always", hint: "Marca 'N/A' si el canal no opera en esta sucursal" },
+  { id: 27, mod: "front", block: "Sistemas", name: "pide.rockandwok.com activo", type: "check", crit: "C", blocks: "always" },
+  { id: 28, mod: "front", block: "Personal", name: "Personal presente por posición", type: "posiciones", items: ["Dragón naranja o amarillo", "Tigre naranja", "Tigre amarillo", "Dragón blanco"], crit: "C", blocks: "always" },
+  { id: 29, mod: "front", block: "Salón y exterior", name: "Salón: mesas montadas, clima, música", type: "photo", crit: "M", blocks: null, naOption: true, hint: "Aplica según sucursal" },
+  { id: 30, mod: "front", block: "Salón y exterior", name: "Exterior, acceso y letrero", type: "photo", crit: "M", blocks: null },
+  { id: 31, mod: "front", block: "Salón y exterior", name: "Baños limpios y con insumos", type: "check", crit: "M", blocks: null },
+];
+
+const PTS = { C: 10, I: 4, M: 1 };
+const CRIT_LABEL = { C: "CRÍTICO", I: "IMPORTANTE", M: "MENOR" };
+const CRIT_STYLE = { C: "bg-red-600 text-white", I: "bg-amber-500 text-black", M: "bg-stone-300 text-stone-700" };
+
+/* ============ EVALUACIÓN ============ */
+function tempValue(c, e) { let v = parseFloat(e.value); if (isNaN(v)) return NaN; if (c.neg) v = -Math.abs(v); return v; }
+function evalControl(c, e) {
+  if (!e) return { status: "pending", pct: 0 };
+  if (c.type === "temp") {
+    if (e.value === "" || e.value == null) return { status: "pending", pct: 0 };
+    const v = tempValue(c, e);
+    if (isNaN(v)) return { status: "pending", pct: 0 };
+    return v >= c.min && v <= c.max ? { status: "ok", pct: 1 } : { status: "falla", pct: 0 };
+  }
+  if (c.type === "stock") {
+    if (e.value === "" || e.value == null) return { status: "pending", pct: 0 };
+    const v = parseFloat(e.value);
+    if (isNaN(v)) return { status: "pending", pct: 0 };
+    const pct = Math.min(v / c.min, 1);
+    if (pct >= 1) return { status: "ok", pct: 1 };
+    if (pct >= 0.7) return { status: "alerta", pct };
+    return { status: "falla", pct };
+  }
+  if (c.type === "multicount") {
+    const counts = e.counts || {};
+    let worst = "ok", sum = 0;
+    for (const it of c.items) {
+      const raw = counts[it];
+      if (raw === "" || raw == null || isNaN(parseFloat(raw))) return { status: "pending", pct: 0 };
+      const pct = Math.min(parseFloat(raw) / c.minEach, 1);
+      sum += pct;
+      if (pct < 0.7) worst = "falla";
+      else if (pct < 1 && worst !== "falla") worst = "alerta";
+    }
+    return { status: worst, pct: sum / c.items.length };
+  }
+  if (c.type === "check") {
+    if (e.ok == null) return { status: "pending", pct: 0 };
+    return e.ok ? { status: "ok", pct: 1 } : { status: "falla", pct: 0 };
+  }
+  if (c.type === "checkfoto") {
+    if (e.ok === false) return { status: "falla", pct: 0 };
+    if (e.ok === true && e.photo) return { status: "ok", pct: 1 };
+    return { status: "pending", pct: 0 };
+  }
+  if (c.type === "photo") {
+    if (c.naOption && e.na) return { status: "ok", pct: 1 };
+    return e.photo ? { status: "ok", pct: 1 } : { status: "pending", pct: 0 };
+  }
+  if (c.type === "muestreo") {
+    const items = e.items || {};
+    const keys = Object.keys(items);
+    if (!keys.length || keys.some((k) => items[k] == null)) return { status: "pending", pct: 0 };
+    return keys.every((k) => items[k]) ? { status: "ok", pct: 1 } : { status: "falla", pct: 0 };
+  }
+  if (c.type === "canales") {
+    const it = e.items || {};
+    let anyFail = false;
+    for (const n of c.items) {
+      const v = it[n];
+      if (v == null) return { status: "pending", pct: 0 };
+      if (v === "fail") anyFail = true;
+    }
+    return anyFail ? { status: "falla", pct: 0 } : { status: "ok", pct: 1 };
+  }
+  if (c.type === "posiciones") {
+    const p = e.pos || {};
+    let missing = false;
+    for (const n of c.items) {
+      if (p[n] == null) return { status: "pending", pct: 0 };
+      if (p[n] === false) missing = true;
+    }
+    return missing ? { status: "falla", pct: 0 } : { status: "ok", pct: 1 };
+  }
+  if (c.type === "pos") {
+    if (e.ok == null || e.value === "" || e.value == null) return { status: "pending", pct: 0 };
+    return e.ok && parseFloat(e.value) > 0 ? { status: "ok", pct: 1 } : { status: "falla", pct: 0 };
+  }
+  return { status: "pending", pct: 0 };
+}
+
+/* ============ DESCRIPCIÓN DEL VALOR CAPTURADO (para CSV y reportes) ============ */
+function describeValor(c, e) {
+  if (!e) return "";
+  if (c.type === "temp") { if (e.value === "" || e.value == null) return ""; const v = tempValue(c, e); return isNaN(v) ? "" : `${v} ${c.unit}`; }
+  if (c.type === "stock") return e.value != null && e.value !== "" ? `${e.value} ${c.unit} (mín ${c.min})` : "";
+  if (c.type === "multicount") { const cts = e.counts || {}; return c.items.map((i) => `${i}: ${cts[i] ?? "—"}`).join(" · "); }
+  if (c.type === "check") return e.ok == null ? "" : (e.ok ? (c.okText || "Conforme") : (c.failText || "No conforme"));
+  if (c.type === "checkfoto") return (e.ok == null ? "" : (e.ok ? "Conforme" : "No conforme")) + (e.photo ? " + foto" : "");
+  if (c.type === "photo") return c.naOption && e.na ? "No aplica" : (e.photo ? "Foto capturada" : "");
+  if (c.type === "muestreo") { const it = e.items || {}; return Object.keys(it).map((k) => `${k}: ${it[k] == null ? "—" : it[k] ? "OK" : "NO"}`).join(" · "); }
+  if (c.type === "canales") { const it = e.items || {}; return c.items.map((k) => `${k}: ${it[k] == null ? "—" : it[k] === "ok" ? "En línea" : it[k] === "fail" ? "Caído" : "N/A"}`).join(" · "); }
+  if (c.type === "posiciones") { const p = e.pos || {}; let s = c.items.map((k) => `${k}: ${p[k] == null ? "—" : p[k] ? "Presente" : "Ausente"}`).join(" · "); if (e.extra) s += ` · Extra: ${e.extra}`; return s; }
+  if (c.type === "pos") return `${e.ok == null ? "—" : e.ok ? "POS activo" : "Sin sistema"} · Fondo $${e.value ?? "—"}`;
+  return "";
+}
+
+/* ============ SEMÁFORO GLOBAL ============ */
+function evalGlobal(entries) {
+  let pts = 0, ptsMax = 0, criticalOpen = [], impFail = 0, minorFail = 0, pendingCrit = 0, pendingTotal = 0;
+  const incidencias = [];
+  for (const c of CONTROLS) {
+    const r = evalControl(c, entries[c.id]);
+    const w = PTS[c.crit];
+    ptsMax += w;
+    if (r.status === "ok") pts += w;
+    else if (r.status === "alerta") pts += w * r.pct;
+    if (r.status === "pending") { pendingTotal++; if (c.crit === "C") pendingCrit++; }
+    if (r.status === "falla") {
+      incidencias.push({ c, r });
+      if (c.crit === "C") criticalOpen.push(c);
+      else if (c.crit === "I") impFail++;
+      else minorFail++;
+    }
+    if (r.status === "alerta") incidencias.push({ c, r, alerta: true });
+  }
+  const score = Math.round((pts / ptsMax) * 100);
+  let estado, razon;
+  if (criticalOpen.length > 0) { estado = "rojo"; razon = `${criticalOpen.length} control(es) crítico(s) fallando`; }
+  else if (pendingCrit > 0) { estado = "rojo"; razon = `${pendingCrit} control(es) crítico(s) sin capturar`; }
+  else if (score < 75) { estado = "rojo"; razon = `Score ${score} < 75`; }
+  else if (score < 90 || impFail >= 2) { estado = "amarillo"; razon = impFail >= 2 ? `${impFail} importantes fallando` : `Score ${score} (75–89)`; }
+  else { estado = "verde"; razon = impFail === 1 ? "1 importante abierto con incidencia" : "Todos los controles al estándar"; }
+  return { estado, razon, score, incidencias, pendingTotal, pendingCrit, criticalOpen, impFail, minorFail };
+}
+
+/* ============ RUTEO DE NOTIFICACIONES (simulado en piloto) ============ */
+function notifyTarget(c) {
+  if (c.type === "posiciones") return "Recursos Humanos + Gerente distrital";
+  if (c.type === "temp") return "Mantenimiento + Gerente de turno";
+  if (c.type === "canales" || c.type === "pos" || c.id === 27) return "Soporte de sistemas (Foodbot)";
+  if (c.type === "stock" || c.type === "multicount") return "Jefe de producción + Gerente distrital";
+  return "Gerente de turno";
+}
+
+/* ============ HISTORIAL, RESUMEN Y CSV ============ */
+function sanitizeKey(s) { return (s || "sucursal").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "sucursal"; }
+
+function buildResumen(meta, today, g, entries, captured, total) {
+  const icon = { verde: "🟢", amarillo: "🟡", rojo: "🔴" }[g.estado];
+  const estado = { verde: "LISTO PARA ABRIR", amarillo: "APERTURA CON OBSERVACIONES", rojo: "NO LISTO PARA ABRIR" }[g.estado];
+  let txt = "";
+  if (!meta.firma) txt += "⏳ REPORTE PRELIMINAR — apertura aún NO liberada\n";
+  txt += `🏮 LINE CHECK · ${meta.sucursal || "Sucursal"} · ${today}\n${icon} ${estado} · Score ${g.score} · ${captured}/${total} capturados\n`;
+  txt += `Responsable: ${meta.responsable || "—"}${meta.puesto ? ` (${meta.puesto})` : ""}\n`;
+  if (meta.firma) txt += `✍ Liberado a las ${new Date(meta.firma.ts).toLocaleTimeString()}\n`;
+  const pend = CONTROLS.filter((c) => evalControl(c, entries[c.id]).status === "pending");
+  if (g.incidencias.length) {
+    txt += `\nIncidencias (${g.incidencias.length}):\n`;
+    for (const { c, r, alerta } of g.incidencias) {
+      txt += `• ${c.name} [${CRIT_LABEL[c.crit]}${alerta ? ` · ${Math.round(r.pct * 100)}% del mínimo` : ""}]\n  Acción: ${entries[c.id]?.comment || "pendiente de registrar"}\n  Notificar: ${notifyTarget(c)}\n`;
+    }
+  }
+  if (pend.length) {
+    txt += `\n⏳ Pendientes de captura (${pend.length}):\n` + pend.map((c) => `• ${c.name}${c.crit === "C" ? " [CRÍTICO]" : ""}`).join("\n") + "\n";
+  }
+  if (!g.incidencias.length && !pend.length) txt += "\nSin incidencias. Todos los controles al estándar. ✅\n";
+  return txt;
+}
+
+function exportCSV(records) {
+  const rows = [["Fecha", "Sucursal", "Responsable", "Puesto", "Estado", "Score", "Bloque", "Control", "Criticidad", "Valor capturado", "Status", "Comentario / acción", "Notificar a", "Hora de captura"]];
+  const push = (rec) => {
+    if ((rec.respuestas || []).length) {
+      rec.respuestas.forEach((r) => rows.push([rec.fecha, rec.sucursal, rec.responsable || (rec.firma && rec.firma.nombre) || "", rec.puesto || "", rec.estado, rec.score, r.block, r.name, CRIT_LABEL[r.crit] || r.crit, r.valor, r.status, r.comment || "", r.notifica || "", r.hora || ""]));
+    } else {
+      (rec.incidencias || []).forEach((inc) => rows.push([rec.fecha, rec.sucursal, (rec.firma && rec.firma.nombre) || "", rec.puesto || "", rec.estado, rec.score, "", inc.name, CRIT_LABEL[inc.crit] || inc.crit, "", inc.alerta ? "alerta" : "falla", inc.comment || "", inc.notifica || "", ""]));
+    }
+  };
+  records.forEach(push);
+  const csv = "\uFEFF" + rows.map((r) => r.map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `linecheck_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ============ FOTO: comprimir a miniatura ============ */
+function compressImage(file, cb) {
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 480 / Math.max(img.width, img.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * scale);
+      cv.height = Math.round(img.height * scale);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      cb(cv.toDataURL("image/jpeg", 0.6));
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+/* ============ UI ============ */
+const SEM = {
+  verde: { bg: "bg-emerald-600", text: "LISTO PARA ABRIR", icon: "●" },
+  amarillo: { bg: "bg-amber-500", text: "APERTURA CON OBSERVACIONES", icon: "▲" },
+  rojo: { bg: "bg-red-600", text: "NO LISTO PARA ABRIR", icon: "■" },
+};
+const STATUS_DOT = { ok: "bg-emerald-500", alerta: "bg-amber-400", falla: "bg-red-500", pending: "bg-stone-300" };
+
+function Badge({ crit }) {
+  return <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${CRIT_STYLE[crit]}`} style={{ fontSize: 10, letterSpacing: "0.08em" }}>{CRIT_LABEL[crit]}</span>;
+}
+
+function PhotoInput({ e, set, label }) {
+  return e.photo ? (
+    <div className="flex items-center gap-3 mt-2">
+      <img src={e.photo} alt="evidencia" className="w-20 h-20 object-cover rounded-lg border border-stone-200" />
+      <div>
+        <p className="text-emerald-700 font-bold" style={{ fontSize: 13 }}>Evidencia capturada</p>
+        <p className="text-stone-400" style={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}>{e.ts ? new Date(e.ts).toLocaleTimeString() : ""}</p>
+        <button onClick={() => set({ photo: null })} className="text-stone-500 underline mt-1" style={{ fontSize: 12 }}>Repetir foto</button>
+      </div>
+    </div>
+  ) : (
+    <label className="block w-full text-center py-2.5 mt-2 rounded-lg border-2 border-dashed border-stone-300 text-stone-600 font-bold cursor-pointer" style={{ fontSize: 13 }}>
+      📷 {label || "Tomar fotografía"}
+      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(ev) => { const f = ev.target.files[0]; if (f) compressImage(f, (url) => set({ photo: url })); }} />
+    </label>
+  );
+}
+
+function ControlCard({ c, entry, update, assignedItems }) {
+  const e = entry || {};
+  const r = evalControl(c, e);
+  const needsComment = r.status === "falla" || r.status === "alerta";
+  const set = (patch) => update(c.id, { ...e, ...patch, ts: new Date().toISOString() });
+  const titleExtra = c.assigned === "proteina" && assignedItems.proteina ? `: ${assignedItems.proteina[0]}` : "";
+
+  return (
+    <div className={`rounded-xl border bg-white p-3 mb-2 ${r.status === "falla" ? "border-red-400" : r.status === "alerta" ? "border-amber-400" : "border-stone-200"}`}>
+      <div className="flex items-start gap-2">
+        <span className={`mt-1 w-2.5 h-2.5 rounded-full shrink-0 ${STATUS_DOT[r.status]}`}></span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <p className="font-semibold text-stone-900 leading-tight" style={{ fontSize: 14 }}>{c.name}<span className="text-orange-700">{titleExtra}</span></p>
+            <Badge crit={c.crit} />
+          </div>
+
+          {c.type === "temp" && <p className="text-stone-500 mt-0.5" style={{ fontSize: 12 }}>Rango: {c.hint || `${c.min}–${c.max}${c.unit}`}</p>}
+          {c.type === "stock" && <p className="text-stone-500 mt-0.5" style={{ fontSize: 12 }}>Mínimo: {c.min} {c.unit}{c.hint ? ` · ${c.hint}` : ""}</p>}
+          {c.type === "multicount" && <p className="text-stone-500 mt-0.5" style={{ fontSize: 12 }}>Mínimo por tipo: {c.minEach} {c.unit}</p>}
+          {(c.type === "canales" || c.type === "muestreo" || (c.type === "photo" && c.hint)) && c.hint && <p className="text-stone-500 mt-0.5" style={{ fontSize: 12 }}>{c.hint}</p>}
+          {c.assigned === "proteina" && assignedItems.proteina && <p className="text-orange-700 font-bold mt-0.5" style={{ fontSize: 12 }}>🎯 Hoy el sistema asignó: {assignedItems.proteina[0]} · medir al centro, 0–4°C</p>}
+
+          {(c.type === "temp" || c.type === "stock") && (
+            <div className="flex items-center gap-2 mt-2">
+              {c.neg && <span className="font-black text-stone-800" style={{ fontSize: 24 }}>–</span>}
+              <input type="number" inputMode="decimal" step="0.1" min="0" value={e.value ?? ""} onChange={(ev) => set({ value: ev.target.value })} placeholder={c.neg ? "18" : "0.0"}
+                className="w-28 border border-stone-300 rounded-lg px-3 py-2 text-lg font-bold text-stone-900 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+              <span className="text-stone-500 font-medium" style={{ fontSize: 13 }}>{c.unit}</span>
+              {c.type === "stock" && r.status !== "pending" && (
+                <span className={`ml-auto font-bold ${r.status === "ok" ? "text-emerald-600" : r.status === "alerta" ? "text-amber-600" : "text-red-600"}`} style={{ fontSize: 13 }}>
+                  {Math.round((parseFloat(e.value) / c.min) * 100)}% del mínimo
+                </span>
+              )}
+              {c.type === "temp" && r.status === "falla" && <span className="ml-auto font-bold text-red-600" style={{ fontSize: 13 }}>FUERA DE RANGO</span>}
+            </div>
+          )}
+
+          {c.type === "multicount" && (
+            <div className="mt-2 space-y-1.5">
+              {c.items.map((item) => {
+                const raw = (e.counts || {})[item];
+                const v = parseFloat(raw);
+                const pct = !isNaN(v) ? Math.round((v / c.minEach) * 100) : null;
+                return (
+                  <div key={item} className="flex items-center gap-2">
+                    <span className="flex-1 text-stone-800" style={{ fontSize: 13 }}>{item}</span>
+                    <input type="number" inputMode="numeric" value={raw ?? ""} onChange={(ev) => set({ counts: { ...(e.counts || {}), [item]: ev.target.value } })} placeholder="0"
+                      className="w-16 border border-stone-300 rounded-lg px-2 py-1.5 font-bold text-center" style={{ fontSize: 14 }} />
+                    <span className={`w-14 text-right font-bold ${pct == null ? "text-stone-300" : pct >= 100 ? "text-emerald-600" : pct >= 70 ? "text-amber-600" : "text-red-600"}`} style={{ fontSize: 12 }}>{pct == null ? "—" : pct + "%"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {c.type === "pos" && (
+            <div className="mt-2 space-y-2">
+              <div className="flex gap-2">
+                <button onClick={() => set({ ok: true })} className={`flex-1 py-2 rounded-lg font-bold border ${e.ok === true ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-stone-600 border-stone-300"}`} style={{ fontSize: 13 }}>POS activo</button>
+                <button onClick={() => set({ ok: false })} className={`flex-1 py-2 rounded-lg font-bold border ${e.ok === false ? "bg-red-600 text-white border-red-600" : "bg-white text-stone-600 border-stone-300"}`} style={{ fontSize: 13 }}>Sin sistema</button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-stone-500" style={{ fontSize: 13 }}>Fondo de caja $</span>
+                <input type="number" inputMode="decimal" value={e.value ?? ""} onChange={(ev) => set({ value: ev.target.value })} placeholder="0" className="w-28 border border-stone-300 rounded-lg px-3 py-1.5 font-bold" />
+              </div>
+            </div>
+          )}
+
+          {c.type === "check" && (
+            <div className="flex gap-2 mt-2">
+              <button onClick={() => set({ ok: true })} className={`flex-1 py-2 rounded-lg font-bold border ${e.ok === true ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-stone-600 border-stone-300"}`} style={{ fontSize: 13 }}>{c.okText || "Conforme"}</button>
+              <button onClick={() => set({ ok: false })} className={`flex-1 py-2 rounded-lg font-bold border ${e.ok === false ? "bg-red-600 text-white border-red-600" : "bg-white text-stone-600 border-stone-300"}`} style={{ fontSize: 13 }}>{c.failText || "No conforme"}</button>
+            </div>
+          )}
+
+          {c.type === "checkfoto" && (
+            <div className="mt-2">
+              <div className="flex gap-2">
+                <button onClick={() => set({ ok: true })} className={`flex-1 py-2 rounded-lg font-bold border ${e.ok === true ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-stone-600 border-stone-300"}`} style={{ fontSize: 13 }}>Conforme</button>
+                <button onClick={() => set({ ok: false })} className={`flex-1 py-2 rounded-lg font-bold border ${e.ok === false ? "bg-red-600 text-white border-red-600" : "bg-white text-stone-600 border-stone-300"}`} style={{ fontSize: 13 }}>No conforme</button>
+              </div>
+              <PhotoInput e={e} set={set} label="Foto de la pulpa (obligatoria)" />
+            </div>
+          )}
+
+          {c.type === "photo" && (
+            <div>
+              {c.naOption && !e.photo && (
+                e.na
+                  ? <p className="mt-2 text-stone-500 font-medium" style={{ fontSize: 13 }}>No aplica en esta sucursal · <button onClick={() => set({ na: false })} className="underline">reactivar</button></p>
+                  : <button onClick={() => set({ na: true })} className="mt-1 text-stone-400 underline" style={{ fontSize: 12 }}>No aplica en esta sucursal</button>
+              )}
+              {!(c.naOption && e.na) && <PhotoInput e={e} set={set} />}
+            </div>
+          )}
+
+          {c.type === "muestreo" && assignedItems[c.assigned] && (
+            <div className="mt-2 space-y-1.5">
+              <p className="text-orange-700 font-medium" style={{ fontSize: 12 }}>Asignación de hoy:</p>
+              {assignedItems[c.assigned].map((item) => {
+                const val = (e.items || {})[item];
+                return (
+                  <div key={item} className="flex items-center gap-2">
+                    <span className="flex-1 text-stone-800" style={{ fontSize: 13 }}>{item}</span>
+                    <button onClick={() => set({ items: { ...(e.items || {}), [item]: true } })} className={`px-2.5 py-1 rounded font-bold border ${val === true ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-stone-500 border-stone-300"}`} style={{ fontSize: 12 }}>{c.okLabel}</button>
+                    <button onClick={() => set({ items: { ...(e.items || {}), [item]: false } })} className={`px-2.5 py-1 rounded font-bold border ${val === false ? "bg-red-600 text-white border-red-600" : "bg-white text-stone-500 border-stone-300"}`} style={{ fontSize: 12 }}>{c.failLabel}</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {c.type === "canales" && (
+            <div className="mt-2 space-y-1.5">
+              {c.items.map((canal) => {
+                const v = (e.items || {})[canal];
+                const setCanal = (val) => set({ items: { ...(e.items || {}), [canal]: val } });
+                return (
+                  <div key={canal} className="flex items-center gap-1.5">
+                    <span className="flex-1 text-stone-800 font-medium" style={{ fontSize: 13 }}>{canal}</span>
+                    <button onClick={() => setCanal("ok")} className={`px-2 py-1 rounded font-bold border ${v === "ok" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-stone-500 border-stone-300"}`} style={{ fontSize: 12 }}>En línea</button>
+                    <button onClick={() => setCanal("fail")} className={`px-2 py-1 rounded font-bold border ${v === "fail" ? "bg-red-600 text-white border-red-600" : "bg-white text-stone-500 border-stone-300"}`} style={{ fontSize: 12 }}>Caído</button>
+                    <button onClick={() => setCanal("na")} className={`px-2 py-1 rounded font-bold border ${v === "na" ? "bg-stone-500 text-white border-stone-500" : "bg-white text-stone-400 border-stone-300"}`} style={{ fontSize: 12 }}>N/A</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {c.type === "posiciones" && (
+            <div className="mt-2 space-y-1.5">
+              {c.items.map((pos) => {
+                const v = (e.pos || {})[pos];
+                return (
+                  <div key={pos} className="flex items-center gap-2">
+                    <span className="flex-1 text-stone-800" style={{ fontSize: 13 }}>{pos}</span>
+                    <button onClick={() => set({ pos: { ...(e.pos || {}), [pos]: true } })} className={`px-2.5 py-1 rounded font-bold border ${v === true ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-stone-500 border-stone-300"}`} style={{ fontSize: 12 }}>Presente</button>
+                    <button onClick={() => set({ pos: { ...(e.pos || {}), [pos]: false } })} className={`px-2.5 py-1 rounded font-bold border ${v === false ? "bg-red-600 text-white border-red-600" : "bg-white text-stone-500 border-stone-300"}`} style={{ fontSize: 12 }}>Ausente</button>
+                  </div>
+                );
+              })}
+              <input value={e.extra ?? ""} onChange={(ev) => set({ extra: ev.target.value })} placeholder="Posición adicional presente (opcional)"
+                className="w-full border border-stone-300 rounded-lg px-2.5 py-1.5 mt-1" style={{ fontSize: 13 }} />
+            </div>
+          )}
+
+          {needsComment && (
+            <div className="mt-2">
+              <textarea value={e.comment ?? ""} onChange={(ev) => set({ comment: ev.target.value })} rows={2}
+                placeholder="Obligatorio: describe el problema y la acción correctiva con hora límite…"
+                className={`w-full border rounded-lg px-2.5 py-2 ${!e.comment ? "border-red-400 bg-red-50" : "border-stone-300"}`} style={{ fontSize: 13 }} />
+              {!e.comment && <p className="text-red-600 font-medium" style={{ fontSize: 11 }}>La incidencia no puede quedar sin acción registrada.</p>}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============ APP ============ */
+function LineCheckApp() {
+  const today = new Date().toISOString().slice(0, 10);
+  const storageKey = `linecheck:${today}`;
+  const [entries, setEntries] = useState({});
+  const [meta, setMeta] = useState({ sucursal: "", responsable: "", puesto: "", firma: null });
+  const [tab, setTab] = useState("linea");
+  const [loaded, setLoaded] = useState(false);
+  const [hist, setHist] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+
+  const assignedItems = useMemo(() => {
+    const rng = mulberry32(hashStr(today));
+    const sensorial = [
+      "Salsa: " + pickN(POOL_SALSAS, 1, rng)[0],
+      "Aderezo: " + pickN(POOL_ADEREZOS, 1, rng)[0],
+      "Bebida: " + pickN(POOL_CONCENTRADOS, 1, rng)[0],
+      ...pickN(POOL_VEGETALES, 3, rng).map((v) => "Vegetal: " + v),
+      ...PROTEINAS.map((p) => "Proteína: " + p),
+    ];
+    return { sensorial, proteina: pickN(PROTEINAS, 1, rng) };
+  }, [today]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(storageKey);
+        if (res?.value) { const d = JSON.parse(res.value); setEntries(d.entries || {}); setMeta({ sucursal: "", responsable: "", puesto: "", firma: null, ...(d.meta || {}) }); }
+      } catch { /* primer uso del día */ }
+      setLoaded(true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const t = setTimeout(async () => {
+      try { await window.storage.set(storageKey, JSON.stringify({ entries, meta })); } catch (err) { console.error("No se pudo guardar", err); }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [entries, meta, loaded]);
+
+  const update = (id, val) => setEntries((prev) => ({ ...prev, [id]: val }));
+  const g = evalGlobal(entries);
+  const sem = SEM[g.estado];
+
+  const captured = CONTROLS.filter((c) => evalControl(c, entries[c.id]).status !== "pending").length;
+  const commentsMissing = g.incidencias.some(({ c }) => !(entries[c.id]?.comment));
+  const canSign = g.estado !== "rojo" && g.pendingTotal === 0 && !commentsMissing && meta.responsable.trim() && meta.sucursal && meta.puesto;
+
+  const buildRespuestas = () => CONTROLS.map((c) => {
+    const e = entries[c.id];
+    const r = evalControl(c, e);
+    return {
+      name: c.name, block: c.block, crit: c.crit,
+      valor: describeValor(c, e || {}),
+      status: r.status === "alerta" ? `alerta ${Math.round(r.pct * 100)}%` : r.status,
+      comment: e?.comment || "",
+      notifica: (r.status === "falla" || r.status === "alerta") ? notifyTarget(c) : "",
+      hora: e?.ts ? new Date(e.ts).toLocaleTimeString() : "",
+    };
+  });
+
+  const firmarLiberacion = async () => {
+    const firma = { nombre: meta.responsable, ts: new Date().toISOString() };
+    setMeta({ ...meta, firma });
+    const record = {
+      sucursal: meta.sucursal || "Sucursal", fecha: today, firma, responsable: meta.responsable, puesto: meta.puesto,
+      estado: g.estado, score: g.score,
+      respuestas: buildRespuestas(),
+      incidencias: g.incidencias.map(({ c, r, alerta }) => ({ name: c.name, crit: c.crit, alerta: !!alerta, pct: Math.round(r.pct * 100), comment: entries[c.id]?.comment || "", notifica: notifyTarget(c) })),
+      fotos: CONTROLS.filter((c) => entries[c.id]?.photo).map((c) => ({ name: c.name, photo: entries[c.id].photo, ts: entries[c.id].ts })),
+      resumen: buildResumen({ ...meta, firma }, today, g, entries, captured, CONTROLS.length),
+    };
+    try {
+      const key = `historial:${sanitizeKey(meta.sucursal)}:${today}`;
+      await window.storage.set(key, JSON.stringify(record), true);
+      const res = await window.storage.list("historial:", true);
+      const keys = (res?.keys || []).sort();
+      while (keys.length > 15) { const old = keys.shift(); try { await window.storage.delete(old, true); } catch {} }
+    } catch (err) { console.error("No se pudo guardar en historial", err); }
+    if (SYNC_URL) {
+      try { fetch(SYNC_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ ...record, fotos: (record.fotos || []).length }) }); } catch {}
+    }
+  };
+
+  const copiarResumen = async () => {
+    const txt = buildResumen(meta, today, g, entries, captured, CONTROLS.length);
+    try { await navigator.clipboard.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 2500); }
+    catch { window.prompt("Copia el resumen:", txt); }
+  };
+
+  const descargarCSV = () => {
+    const records = [...(hist || [])];
+    if (!meta.firma && captured > 0) {
+      records.unshift({ fecha: today, sucursal: meta.sucursal || "Sucursal", responsable: meta.responsable, puesto: meta.puesto, estado: `${g.estado} (en proceso)`, score: g.score, respuestas: buildRespuestas() });
+    }
+    if (!records.length) { alert("Aún no hay datos para exportar."); return; }
+    exportCSV(records);
+  };
+
+  const loadHist = async () => {
+    try {
+      const res = await window.storage.list("historial:", true);
+      const keys = (res?.keys || []).slice(-10).reverse();
+      const out = [];
+      for (const k of keys) {
+        try { const r = await window.storage.get(typeof k === "string" ? k : k.key, true); if (r?.value) out.push(JSON.parse(r.value)); } catch {}
+      }
+      out.sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+      setHist(out);
+    } catch { setHist([]); }
+  };
+  useEffect(() => { if (tab === "historial") { setHist(null); loadHist(); } }, [tab]);
+
+  const modControls = (mod) => {
+    const blocks = [...new Set(CONTROLS.filter((c) => c.mod === mod).map((c) => c.block))];
+    return blocks.map((b) => (
+      <div key={b}>
+        <p className="uppercase font-bold text-stone-400 mt-4 mb-2" style={{ fontSize: 11, letterSpacing: "0.14em" }}>{b}</p>
+        {CONTROLS.filter((c) => c.mod === mod && c.block === b).map((c) => (
+          <ControlCard key={c.id} c={c} entry={entries[c.id]} update={update} assignedItems={assignedItems} />
+        ))}
+      </div>
+    ));
+  };
+
+  return (
+    <div className="min-h-screen bg-stone-100 pb-32" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="bg-stone-950 text-white px-4 pt-5 pb-4">
+        <div className="flex items-baseline justify-between">
+          <h1 className="font-black tracking-tight" style={{ fontSize: 22 }}>ROCK N&rsquo;WOK</h1>
+          <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} className="text-orange-400">{today}</span>
+        </div>
+        <p className="uppercase text-stone-400 mt-0.5" style={{ fontSize: 11, letterSpacing: "0.2em" }}>Line Check · Validación de apertura · v1.2</p>
+        <div className="mt-3">
+          <select value={meta.sucursal} onChange={(e) => setMeta({ ...meta, sucursal: e.target.value })}
+            className={`w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 ${meta.sucursal ? "text-white" : "text-stone-500"}`} style={{ fontSize: 14 }}>
+            <option value="">Selecciona la sucursal…</option>
+            {SUCURSALES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div className="flex gap-2 mt-2">
+          <input value={meta.responsable} onChange={(e) => setMeta({ ...meta, responsable: e.target.value })} placeholder="Nombre del responsable" className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-white placeholder-stone-500" style={{ fontSize: 13 }} />
+          <select value={meta.puesto} onChange={(e) => setMeta({ ...meta, puesto: e.target.value })}
+            className={`w-32 bg-stone-800 border border-stone-700 rounded-lg px-2 py-2 ${meta.puesto ? "text-white" : "text-stone-500"}`} style={{ fontSize: 13 }}>
+            <option value="">Puesto…</option>
+            {PUESTOS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="flex bg-white border-b border-stone-200 sticky top-0 z-10">
+        {[["linea", "Línea"], ["front", "Front"], ["resumen", "Liberación"], ["historial", "Historial"]].map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)} className={`flex-1 py-3 font-bold ${tab === k ? "text-orange-600 border-b-2 border-orange-600" : "text-stone-500"}`} style={{ fontSize: 13 }}>{label}</button>
+        ))}
+      </div>
+
+      <div className="px-3 max-w-lg mx-auto">
+        {tab === "linea" && modControls("linea")}
+        {tab === "front" && modControls("front")}
+
+        {tab === "historial" && (
+          <div className="mt-4">
+            <p className="text-stone-500 bg-white rounded-xl p-3 border border-stone-200 mb-3" style={{ fontSize: 12 }}>
+              Antecedente de aperturas firmadas en este dispositivo (versión piloto — en producción vive en la base de datos central).
+            </p>
+            <button onClick={descargarCSV} className="w-full py-2.5 mb-3 rounded-xl font-bold bg-stone-950 text-white" style={{ fontSize: 14 }}>
+              ⬇ Descargar historial en CSV (Excel)
+            </button>
+            {hist === null && <p className="text-stone-400 text-center py-6" style={{ fontSize: 13 }}>Cargando historial…</p>}
+            {hist !== null && hist.length === 0 && <p className="text-stone-400 text-center py-6" style={{ fontSize: 13 }}>Aún no hay aperturas firmadas. La primera liberación creará el primer expediente.</p>}
+            {hist !== null && hist.map((h, i) => {
+              const s = SEM[h.estado] || SEM.rojo;
+              const open = expanded === i;
+              return (
+                <div key={i} className="bg-white rounded-xl border border-stone-200 mb-2 overflow-hidden">
+                  <button onClick={() => setExpanded(open ? null : i)} className="w-full text-left p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-bold text-stone-900" style={{ fontSize: 14 }}>{h.sucursal}</p>
+                        <p className="text-stone-500" style={{ fontFamily: "ui-monospace, monospace", fontSize: 11 }}>{h.fecha} · {h.firma?.nombre}{h.puesto ? ` (${h.puesto})` : ""} · {h.firma ? new Date(h.firma.ts).toLocaleTimeString() : ""}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className={`${s.bg} text-white font-bold px-2 py-1 rounded`} style={{ fontSize: 11 }}>{s.icon} {h.score}</span>
+                        <p className="text-stone-400 mt-1" style={{ fontSize: 11 }}>{(h.incidencias || []).length} incidencia(s) · {(h.fotos || []).length} foto(s)</p>
+                      </div>
+                    </div>
+                  </button>
+                  {open && (
+                    <div className="px-3 pb-3 border-t border-stone-100">
+                      {(h.incidencias || []).map((inc, j) => (
+                        <div key={j} className="mt-2">
+                          <p className="font-semibold text-stone-800" style={{ fontSize: 13 }}>{inc.name} <span className={`ml-1 px-1.5 py-0.5 rounded font-bold ${CRIT_STYLE[inc.crit]}`} style={{ fontSize: 10 }}>{CRIT_LABEL[inc.crit]}</span></p>
+                          <p className="text-stone-600" style={{ fontSize: 12 }}>{inc.alerta ? `Alerta · ${inc.pct}% del mínimo` : "Falla"} · {inc.comment || "sin acción registrada"} · 🔔 {inc.notifica}</p>
+                        </div>
+                      ))}
+                      {(h.incidencias || []).length === 0 && <p className="text-emerald-700 font-medium mt-2" style={{ fontSize: 12 }}>Sin incidencias — apertura limpia.</p>}
+                      {(h.fotos || []).length > 0 && (
+                        <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
+                          {h.fotos.map((f, j) => (
+                            <div key={j} className="shrink-0">
+                              <img src={f.photo} alt={f.name} className="w-24 h-24 object-cover rounded-lg border border-stone-200" />
+                              <p className="text-stone-400 w-24 truncate" style={{ fontSize: 10 }}>{f.name}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {tab === "resumen" && (
+          <div className="mt-4">
+            <div className={`${sem.bg} text-white rounded-2xl p-5 text-center`}>
+              <p className="font-black" style={{ fontSize: 26 }}>{sem.icon} {sem.text}</p>
+              <p className="opacity-90 mt-1" style={{ fontSize: 13 }}>{g.razon}</p>
+              <div className="flex justify-center gap-6 mt-3" style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}>
+                <span>Score {g.score}</span>
+                <span>{captured}/{CONTROLS.length} capturados</span>
+              </div>
+            </div>
+
+            {!meta.firma && (
+              <button onClick={copiarResumen} className="w-full mt-3 py-2.5 rounded-xl font-bold bg-stone-950 text-white" style={{ fontSize: 14 }}>
+                {copied ? "✓ Copiado — pégalo en el grupo" : "📲 Copiar reporte para WhatsApp (incluye pendientes y observaciones)"}
+              </button>
+            )}
+
+            {g.criticalOpen.length > 0 && (
+              <div className="bg-white border border-red-300 rounded-xl p-3 mt-3">
+                <p className="font-bold text-red-700" style={{ fontSize: 13 }}>Gates críticos abiertos — bloquean la apertura:</p>
+                {g.criticalOpen.map((c) => <p key={c.id} className="text-stone-800 mt-1" style={{ fontSize: 13 }}>■ {c.name}</p>)}
+              </div>
+            )}
+            {g.pendingCrit > 0 && (
+              <div className="bg-white border border-red-300 rounded-xl p-3 mt-3">
+                <p className="font-bold text-red-700" style={{ fontSize: 13 }}>{g.pendingCrit} control(es) crítico(s) sin capturar. El sistema no libera con evidencia crítica faltante.</p>
+              </div>
+            )}
+
+            <p className="uppercase font-bold text-stone-400 mt-5 mb-2" style={{ fontSize: 11, letterSpacing: "0.14em" }}>Incidencias generadas ({g.incidencias.length})</p>
+            {g.incidencias.length === 0 && <p className="text-stone-500 bg-white rounded-xl p-3 border border-stone-200" style={{ fontSize: 13 }}>Sin incidencias. Todos los controles capturados están al estándar.</p>}
+            {g.incidencias.map(({ c, r, alerta }) => (
+              <div key={c.id + (alerta ? "a" : "f")} className="bg-white rounded-xl border border-stone-200 p-3 mb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold text-stone-900" style={{ fontSize: 13 }}>{c.name}</p>
+                  <Badge crit={c.crit} />
+                </div>
+                <p className={`font-bold mt-0.5 ${alerta ? "text-amber-600" : "text-red-600"}`} style={{ fontSize: 12 }}>
+                  {alerta ? `ALERTA · ${Math.round(r.pct * 100)}% del mínimo` : "FALLA"}
+                  {c.crit === "C" && !alerta ? " · Hora límite: antes de apertura" : c.crit === "I" ? " · Hora límite: ≤ 2 hrs" : ""}
+                </p>
+                <p className="text-stone-600 mt-1" style={{ fontSize: 12 }}>{entries[c.id]?.comment || "⚠ Falta registrar acción correctiva"}</p>
+                <p className="text-orange-700 font-medium mt-1" style={{ fontSize: 12 }}>🔔 Notifica a: {notifyTarget(c)} <span className="text-stone-400">(automático en producción · manual en piloto)</span></p>
+              </div>
+            ))}
+
+            <div className="bg-white rounded-xl border border-stone-200 p-4 mt-5">
+              {meta.firma ? (
+                <div className="text-center">
+                  <p className="font-black text-emerald-700" style={{ fontSize: 15 }}>APERTURA LIBERADA</p>
+                  <p style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} className="text-stone-500 mt-1">{meta.firma.nombre}{meta.puesto ? ` (${meta.puesto})` : ""} · {new Date(meta.firma.ts).toLocaleString()}</p>
+                  <button onClick={copiarResumen} className="w-full mt-3 py-2.5 rounded-xl font-bold bg-emerald-600 text-white" style={{ fontSize: 14 }}>
+                    {copied ? "✓ Copiado — pégalo en el grupo" : "📲 Copiar resumen para WhatsApp"}
+                  </button>
+                  <p className="text-stone-400 mt-2" style={{ fontSize: 11 }}>Guardado en el historial de este dispositivo.</p>
+                </div>
+              ) : (
+                <React.Fragment>
+                  <button disabled={!canSign} onClick={firmarLiberacion}
+                    className={`w-full py-3 rounded-xl font-black ${canSign ? "bg-stone-950 text-white" : "bg-stone-200 text-stone-400"}`} style={{ fontSize: 15 }}>
+                    Firmar liberación de apertura
+                  </button>
+                  {!canSign && (
+                    <p className="text-stone-500 text-center mt-2" style={{ fontSize: 12 }}>
+                      {!meta.sucursal || !meta.puesto || !meta.responsable.trim() ? "Completa sucursal, responsable y puesto en el encabezado." : g.estado === "rojo" ? "No se puede liberar en rojo. Puedes enviar el reporte preliminar mientras corriges." : g.pendingTotal > 0 ? `Faltan ${g.pendingTotal} controles por capturar.` : commentsMissing ? "Hay incidencias sin acción registrada." : ""}
+                    </p>
+                  )}
+                </React.Fragment>
+              )}
+            </div>
+
+            <button onClick={() => { setEntries({}); setMeta({ ...meta, firma: null }); }} className="w-full text-stone-400 underline mt-4 mb-2" style={{ fontSize: 12 }}>Reiniciar Line Check del día</button>
+          </div>
+        )}
+      </div>
+
+      {tab !== "resumen" && tab !== "historial" && (
+        <div className={`fixed bottom-0 left-0 right-0 ${sem.bg} text-white px-4 py-3 flex items-center justify-between shadow-lg`}>
+          <div>
+            <p className="font-black leading-tight" style={{ fontSize: 14 }}>{sem.icon} {sem.text}</p>
+            <p className="opacity-90" style={{ fontSize: 11 }}>{g.razon}</p>
+          </div>
+          <div className="text-right" style={{ fontFamily: "ui-monospace, monospace" }}>
+            <p className="font-bold" style={{ fontSize: 16 }}>{g.score}</p>
+            <p style={{ fontSize: 11 }} className="opacity-90">{captured}/{CONTROLS.length}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<LineCheckApp />);
+</script>
+</body>
+</html>
