@@ -6,6 +6,7 @@
 <title>Line Check · Rock n' Wok</title>
 <meta name="theme-color" content="#0c0a09" />
 <link rel="manifest" href="manifest.json" />
+<link rel="icon" type="image/png" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -13,7 +14,7 @@
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-<style>html,body{background:#f5f5f4;margin:0;-webkit-tap-highlight-color:transparent}</style>
+<style>html,body{background:#f5f5f4;margin:0;-webkit-tap-highlight-color:transparent}select{-webkit-appearance:none;appearance:none}</style>
 </head>
 <body>
 <div id="root"></div>
@@ -30,6 +31,16 @@ if ("serviceWorker" in navigator) { window.addEventListener("load", () => naviga
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo } = React;
 
+/* ===================================================================
+   SINCRONIZACIÓN OPCIONAL A GOOGLE SHEETS (historial multi-dispositivo)
+   Pega aquí la URL de tu Web App de Google Apps Script (ver README.md).
+   Si queda vacío, el historial se guarda solo en este dispositivo.
+=================================================================== */
+const SYNC_URL = "";
+
+const SUCURSALES = ["Explanada", "Vía San Ángel", "UPAEP", "Sonata", "Galerías Serdán", "Parque Puebla", "Outlet Premier", "Angelópolis", "Zócalo"];
+const PUESTOS = ["Guardián", "Tigre", "Dragón"];
+
 /* ============ MUESTREO ALEATORIO DEL DÍA (seed = fecha) ============ */
 function hashStr(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
 function mulberry32(a) { return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -44,7 +55,7 @@ const PROTEINAS = ["Boneless", "Res laminado", "Pollo laminado", "Camarón frito
 /* ============ DEFINICIÓN DE CONTROLES ============ */
 const CONTROLS = [
   { id: 1, mod: "linea", block: "Cadena de frío · Producción (arriba)", name: "Cámara de refrigeración", type: "temp", unit: "°C", min: 0, max: 4, crit: "C", blocks: "always" },
-  { id: 2, mod: "linea", block: "Cadena de frío · Producción (arriba)", name: "Congelador", type: "temp", unit: "°C", min: -40, max: -18, crit: "C", blocks: "always", hint: "≤ –18°C" },
+  { id: 2, mod: "linea", block: "Cadena de frío · Producción (arriba)", name: "Congelador", type: "temp", unit: "°C", min: -40, max: -18, crit: "C", blocks: "always", hint: "≤ –18°C · escribe solo el número, el signo negativo es automático", neg: true },
   { id: 33, mod: "linea", block: "Cadena de frío · Línea", name: "Refrigerador de front", type: "temp", unit: "°C", min: 0, max: 4, crit: "C", blocks: "always" },
   { id: 34, mod: "linea", block: "Cadena de frío · Línea", name: "Mesa de refrigeración", type: "temp", unit: "°C", min: 0, max: 4, crit: "C", blocks: "always" },
   { id: 35, mod: "linea", block: "Cadena de frío · Línea", name: "Refrigerador de cajoneras (bajo estufas)", type: "temp", unit: "°C", min: 0, max: 4, crit: "C", blocks: "always", hint: "0–4°C · el más expuesto al calor de estufas" },
@@ -57,7 +68,7 @@ const CONTROLS = [
   { id: 37, mod: "linea", block: "Disponibilidad · Proteínas", name: "Pollo laminado", type: "stock", unit: "kg", min: 8, crit: "C", blocks: "stock70" },
   { id: 12, mod: "linea", block: "Disponibilidad · Proteínas", name: "Res laminado", type: "stock", unit: "kg", min: 6, crit: "I", blocks: null },
   { id: 13, mod: "linea", block: "Disponibilidad · Proteínas", name: "Camarón frito", type: "stock", unit: "kg", min: 4, crit: "I", blocks: null },
-  { id: 11, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Arroz al vapor disponible", type: "stock", unit: "recetas", min: 10, crit: "C", blocks: "stock70", hint: "1 receta ≈ kg definidos por estándar (calibrar por sucursal)" },
+  { id: 11, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Arroz al vapor disponible", type: "stock", unit: "recetas", min: 3, crit: "C", blocks: "stock70", hint: "1 receta ≈ kg definidos por estándar (calibrar por sucursal)" },
   { id: 15, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Arroz frito (del día)", type: "stock", unit: "recetas", min: 6, crit: "I", blocks: null },
   { id: 16, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Noodles", type: "stock", unit: "recetas", min: 6, crit: "I", blocks: null },
   { id: 17, mod: "linea", block: "Disponibilidad · Bases y entradas", name: "Rockshiages · unidades por tipo", type: "multicount", items: ["Tocino", "Cangrejo", "Papa", "Vainilla", "Oreo", "Limón"], minEach: 8, unit: "uds", crit: "I", blocks: null },
@@ -69,10 +80,10 @@ const CONTROLS = [
   { id: 23, mod: "linea", block: "Montaje y calidad", name: "Packing / delivery con insumos (≥3 hrs)", type: "photo", crit: "I", blocks: null },
   { id: 24, mod: "linea", block: "Montaje y calidad", name: "Limpieza general de línea y pisos", type: "photo", crit: "M", blocks: null },
   { id: 25, mod: "front", block: "Sistemas", name: "POS operando + fondo de caja", type: "pos", unit: "$", crit: "C", blocks: "always" },
-  { id: 26, mod: "front", block: "Sistemas", name: "Canales delivery en línea, menú activo", type: "canales", items: ["Rappi", "Uber Eats", "Didi"], crit: "C", blocks: "always", hint: "Marca 'No aplica' si el canal no opera en esta sucursal (configuración de manager)" },
+  { id: 26, mod: "front", block: "Sistemas", name: "Canales delivery en línea, menú activo", type: "canales", items: ["Rappi", "Uber Eats", "Didi"], crit: "C", blocks: "always", hint: "Marca 'N/A' si el canal no opera en esta sucursal" },
   { id: 27, mod: "front", block: "Sistemas", name: "pide.rockandwok.com activo", type: "check", crit: "C", blocks: "always" },
   { id: 28, mod: "front", block: "Personal", name: "Personal presente por posición", type: "posiciones", items: ["Dragón naranja o amarillo", "Tigre naranja", "Tigre amarillo", "Dragón blanco"], crit: "C", blocks: "always" },
-  { id: 29, mod: "front", block: "Salón y exterior", name: "Salón: mesas montadas, clima, música", type: "photo", crit: "M", blocks: null, naOption: true, hint: "Aplica según sucursal (configuración de manager)" },
+  { id: 29, mod: "front", block: "Salón y exterior", name: "Salón: mesas montadas, clima, música", type: "photo", crit: "M", blocks: null, naOption: true, hint: "Aplica según sucursal" },
   { id: 30, mod: "front", block: "Salón y exterior", name: "Exterior, acceso y letrero", type: "photo", crit: "M", blocks: null },
   { id: 31, mod: "front", block: "Salón y exterior", name: "Baños limpios y con insumos", type: "check", crit: "M", blocks: null },
 ];
@@ -82,11 +93,12 @@ const CRIT_LABEL = { C: "CRÍTICO", I: "IMPORTANTE", M: "MENOR" };
 const CRIT_STYLE = { C: "bg-red-600 text-white", I: "bg-amber-500 text-black", M: "bg-stone-300 text-stone-700" };
 
 /* ============ EVALUACIÓN ============ */
+function tempValue(c, e) { let v = parseFloat(e.value); if (isNaN(v)) return NaN; if (c.neg) v = -Math.abs(v); return v; }
 function evalControl(c, e) {
   if (!e) return { status: "pending", pct: 0 };
   if (c.type === "temp") {
     if (e.value === "" || e.value == null) return { status: "pending", pct: 0 };
-    const v = parseFloat(e.value);
+    const v = tempValue(c, e);
     if (isNaN(v)) return { status: "pending", pct: 0 };
     return v >= c.min && v <= c.max ? { status: "ok", pct: 1 } : { status: "falla", pct: 0 };
   }
@@ -157,6 +169,22 @@ function evalControl(c, e) {
   return { status: "pending", pct: 0 };
 }
 
+/* ============ DESCRIPCIÓN DEL VALOR CAPTURADO (para CSV y reportes) ============ */
+function describeValor(c, e) {
+  if (!e) return "";
+  if (c.type === "temp") { if (e.value === "" || e.value == null) return ""; const v = tempValue(c, e); return isNaN(v) ? "" : `${v} ${c.unit}`; }
+  if (c.type === "stock") return e.value != null && e.value !== "" ? `${e.value} ${c.unit} (mín ${c.min})` : "";
+  if (c.type === "multicount") { const cts = e.counts || {}; return c.items.map((i) => `${i}: ${cts[i] ?? "—"}`).join(" · "); }
+  if (c.type === "check") return e.ok == null ? "" : (e.ok ? (c.okText || "Conforme") : (c.failText || "No conforme"));
+  if (c.type === "checkfoto") return (e.ok == null ? "" : (e.ok ? "Conforme" : "No conforme")) + (e.photo ? " + foto" : "");
+  if (c.type === "photo") return c.naOption && e.na ? "No aplica" : (e.photo ? "Foto capturada" : "");
+  if (c.type === "muestreo") { const it = e.items || {}; return Object.keys(it).map((k) => `${k}: ${it[k] == null ? "—" : it[k] ? "OK" : "NO"}`).join(" · "); }
+  if (c.type === "canales") { const it = e.items || {}; return c.items.map((k) => `${k}: ${it[k] == null ? "—" : it[k] === "ok" ? "En línea" : it[k] === "fail" ? "Caído" : "N/A"}`).join(" · "); }
+  if (c.type === "posiciones") { const p = e.pos || {}; let s = c.items.map((k) => `${k}: ${p[k] == null ? "—" : p[k] ? "Presente" : "Ausente"}`).join(" · "); if (e.extra) s += ` · Extra: ${e.extra}`; return s; }
+  if (c.type === "pos") return `${e.ok == null ? "—" : e.ok ? "POS activo" : "Sin sistema"} · Fondo $${e.value ?? "—"}`;
+  return "";
+}
+
 /* ============ SEMÁFORO GLOBAL ============ */
 function evalGlobal(entries) {
   let pts = 0, ptsMax = 0, criticalOpen = [], impFail = 0, minorFail = 0, pendingCrit = 0, pendingTotal = 0;
@@ -195,22 +223,48 @@ function notifyTarget(c) {
   return "Gerente de turno";
 }
 
-/* ============ HISTORIAL Y RESUMEN ============ */
+/* ============ HISTORIAL, RESUMEN Y CSV ============ */
 function sanitizeKey(s) { return (s || "sucursal").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "sucursal"; }
+
 function buildResumen(meta, today, g, entries, captured, total) {
   const icon = { verde: "🟢", amarillo: "🟡", rojo: "🔴" }[g.estado];
   const estado = { verde: "LISTO PARA ABRIR", amarillo: "APERTURA CON OBSERVACIONES", rojo: "NO LISTO PARA ABRIR" }[g.estado];
-  let txt = `🏮 LINE CHECK · ${meta.sucursal || "Sucursal"} · ${today}\n${icon} ${estado} · Score ${g.score} · ${captured}/${total} capturados\n`;
-  if (meta.firma) txt += `✍ Liberado por ${meta.firma.nombre} a las ${new Date(meta.firma.ts).toLocaleTimeString()}\n`;
+  let txt = "";
+  if (!meta.firma) txt += "⏳ REPORTE PRELIMINAR — apertura aún NO liberada\n";
+  txt += `🏮 LINE CHECK · ${meta.sucursal || "Sucursal"} · ${today}\n${icon} ${estado} · Score ${g.score} · ${captured}/${total} capturados\n`;
+  txt += `Responsable: ${meta.responsable || "—"}${meta.puesto ? ` (${meta.puesto})` : ""}\n`;
+  if (meta.firma) txt += `✍ Liberado a las ${new Date(meta.firma.ts).toLocaleTimeString()}\n`;
+  const pend = CONTROLS.filter((c) => evalControl(c, entries[c.id]).status === "pending");
   if (g.incidencias.length) {
     txt += `\nIncidencias (${g.incidencias.length}):\n`;
     for (const { c, r, alerta } of g.incidencias) {
       txt += `• ${c.name} [${CRIT_LABEL[c.crit]}${alerta ? ` · ${Math.round(r.pct * 100)}% del mínimo` : ""}]\n  Acción: ${entries[c.id]?.comment || "pendiente de registrar"}\n  Notificar: ${notifyTarget(c)}\n`;
     }
-  } else {
-    txt += "\nSin incidencias. Todos los controles al estándar. ✅\n";
   }
+  if (pend.length) {
+    txt += `\n⏳ Pendientes de captura (${pend.length}):\n` + pend.map((c) => `• ${c.name}${c.crit === "C" ? " [CRÍTICO]" : ""}`).join("\n") + "\n";
+  }
+  if (!g.incidencias.length && !pend.length) txt += "\nSin incidencias. Todos los controles al estándar. ✅\n";
   return txt;
+}
+
+function exportCSV(records) {
+  const rows = [["Fecha", "Sucursal", "Responsable", "Puesto", "Estado", "Score", "Bloque", "Control", "Criticidad", "Valor capturado", "Status", "Comentario / acción", "Notificar a", "Hora de captura"]];
+  const push = (rec) => {
+    if ((rec.respuestas || []).length) {
+      rec.respuestas.forEach((r) => rows.push([rec.fecha, rec.sucursal, rec.responsable || (rec.firma && rec.firma.nombre) || "", rec.puesto || "", rec.estado, rec.score, r.block, r.name, CRIT_LABEL[r.crit] || r.crit, r.valor, r.status, r.comment || "", r.notifica || "", r.hora || ""]));
+    } else {
+      (rec.incidencias || []).forEach((inc) => rows.push([rec.fecha, rec.sucursal, (rec.firma && rec.firma.nombre) || "", rec.puesto || "", rec.estado, rec.score, "", inc.name, CRIT_LABEL[inc.crit] || inc.crit, "", inc.alerta ? "alerta" : "falla", inc.comment || "", inc.notifica || "", ""]));
+    }
+  };
+  records.forEach(push);
+  const csv = "\uFEFF" + rows.map((r) => r.map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `linecheck_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ============ FOTO: comprimir a miniatura ============ */
@@ -266,6 +320,7 @@ function ControlCard({ c, entry, update, assignedItems }) {
   const r = evalControl(c, e);
   const needsComment = r.status === "falla" || r.status === "alerta";
   const set = (patch) => update(c.id, { ...e, ...patch, ts: new Date().toISOString() });
+  const titleExtra = c.assigned === "proteina" && assignedItems.proteina ? `: ${assignedItems.proteina[0]}` : "";
 
   return (
     <div className={`rounded-xl border bg-white p-3 mb-2 ${r.status === "falla" ? "border-red-400" : r.status === "alerta" ? "border-amber-400" : "border-stone-200"}`}>
@@ -273,7 +328,7 @@ function ControlCard({ c, entry, update, assignedItems }) {
         <span className={`mt-1 w-2.5 h-2.5 rounded-full shrink-0 ${STATUS_DOT[r.status]}`}></span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <p className="font-semibold text-stone-900 leading-tight" style={{ fontSize: 14 }}>{c.name}</p>
+            <p className="font-semibold text-stone-900 leading-tight" style={{ fontSize: 14 }}>{c.name}<span className="text-orange-700">{titleExtra}</span></p>
             <Badge crit={c.crit} />
           </div>
 
@@ -281,11 +336,12 @@ function ControlCard({ c, entry, update, assignedItems }) {
           {c.type === "stock" && <p className="text-stone-500 mt-0.5" style={{ fontSize: 12 }}>Mínimo: {c.min} {c.unit}{c.hint ? ` · ${c.hint}` : ""}</p>}
           {c.type === "multicount" && <p className="text-stone-500 mt-0.5" style={{ fontSize: 12 }}>Mínimo por tipo: {c.minEach} {c.unit}</p>}
           {(c.type === "canales" || c.type === "muestreo" || (c.type === "photo" && c.hint)) && c.hint && <p className="text-stone-500 mt-0.5" style={{ fontSize: 12 }}>{c.hint}</p>}
-          {c.assigned === "proteina" && assignedItems.proteina && <p className="text-orange-700 font-medium mt-0.5" style={{ fontSize: 12 }}>Hoy toca medir: {assignedItems.proteina[0]} · 0–4°C</p>}
+          {c.assigned === "proteina" && assignedItems.proteina && <p className="text-orange-700 font-bold mt-0.5" style={{ fontSize: 12 }}>🎯 Hoy el sistema asignó: {assignedItems.proteina[0]} · medir al centro, 0–4°C</p>}
 
           {(c.type === "temp" || c.type === "stock") && (
             <div className="flex items-center gap-2 mt-2">
-              <input type="number" inputMode="decimal" step="0.1" value={e.value ?? ""} onChange={(ev) => set({ value: ev.target.value })} placeholder="0.0"
+              {c.neg && <span className="font-black text-stone-800" style={{ fontSize: 24 }}>–</span>}
+              <input type="number" inputMode="decimal" step="0.1" min="0" value={e.value ?? ""} onChange={(ev) => set({ value: ev.target.value })} placeholder={c.neg ? "18" : "0.0"}
                 className="w-28 border border-stone-300 rounded-lg px-3 py-2 text-lg font-bold text-stone-900 focus:outline-none focus:ring-2 focus:ring-orange-500" />
               <span className="text-stone-500 font-medium" style={{ fontSize: 13 }}>{c.unit}</span>
               {c.type === "stock" && r.status !== "pending" && (
@@ -425,7 +481,7 @@ function LineCheckApp() {
   const today = new Date().toISOString().slice(0, 10);
   const storageKey = `linecheck:${today}`;
   const [entries, setEntries] = useState({});
-  const [meta, setMeta] = useState({ sucursal: "", responsable: "", firma: null });
+  const [meta, setMeta] = useState({ sucursal: "", responsable: "", puesto: "", firma: null });
   const [tab, setTab] = useState("linea");
   const [loaded, setLoaded] = useState(false);
   const [hist, setHist] = useState(null);
@@ -448,7 +504,7 @@ function LineCheckApp() {
     (async () => {
       try {
         const res = await window.storage.get(storageKey);
-        if (res?.value) { const d = JSON.parse(res.value); setEntries(d.entries || {}); setMeta(d.meta || { sucursal: "", responsable: "", firma: null }); }
+        if (res?.value) { const d = JSON.parse(res.value); setEntries(d.entries || {}); setMeta({ sucursal: "", responsable: "", puesto: "", firma: null, ...(d.meta || {}) }); }
       } catch { /* primer uso del día */ }
       setLoaded(true);
     })();
@@ -468,31 +524,57 @@ function LineCheckApp() {
 
   const captured = CONTROLS.filter((c) => evalControl(c, entries[c.id]).status !== "pending").length;
   const commentsMissing = g.incidencias.some(({ c }) => !(entries[c.id]?.comment));
-  const canSign = g.estado !== "rojo" && g.pendingTotal === 0 && !commentsMissing && meta.responsable.trim();
+  const canSign = g.estado !== "rojo" && g.pendingTotal === 0 && !commentsMissing && meta.responsable.trim() && meta.sucursal && meta.puesto;
+
+  const buildRespuestas = () => CONTROLS.map((c) => {
+    const e = entries[c.id];
+    const r = evalControl(c, e);
+    return {
+      name: c.name, block: c.block, crit: c.crit,
+      valor: describeValor(c, e || {}),
+      status: r.status === "alerta" ? `alerta ${Math.round(r.pct * 100)}%` : r.status,
+      comment: e?.comment || "",
+      notifica: (r.status === "falla" || r.status === "alerta") ? notifyTarget(c) : "",
+      hora: e?.ts ? new Date(e.ts).toLocaleTimeString() : "",
+    };
+  });
 
   const firmarLiberacion = async () => {
     const firma = { nombre: meta.responsable, ts: new Date().toISOString() };
     setMeta({ ...meta, firma });
+    const record = {
+      sucursal: meta.sucursal || "Sucursal", fecha: today, firma, responsable: meta.responsable, puesto: meta.puesto,
+      estado: g.estado, score: g.score,
+      respuestas: buildRespuestas(),
+      incidencias: g.incidencias.map(({ c, r, alerta }) => ({ name: c.name, crit: c.crit, alerta: !!alerta, pct: Math.round(r.pct * 100), comment: entries[c.id]?.comment || "", notifica: notifyTarget(c) })),
+      fotos: CONTROLS.filter((c) => entries[c.id]?.photo).map((c) => ({ name: c.name, photo: entries[c.id].photo, ts: entries[c.id].ts })),
+      resumen: buildResumen({ ...meta, firma }, today, g, entries, captured, CONTROLS.length),
+    };
     try {
       const key = `historial:${sanitizeKey(meta.sucursal)}:${today}`;
-      const record = {
-        sucursal: meta.sucursal || "Sucursal", fecha: today, firma, estado: g.estado, score: g.score,
-        incidencias: g.incidencias.map(({ c, r, alerta }) => ({ name: c.name, crit: c.crit, alerta: !!alerta, pct: Math.round(r.pct * 100), comment: entries[c.id]?.comment || "", notifica: notifyTarget(c) })),
-        fotos: CONTROLS.filter((c) => entries[c.id]?.photo).map((c) => ({ name: c.name, photo: entries[c.id].photo, ts: entries[c.id].ts })),
-        resumen: buildResumen({ ...meta, firma }, today, g, entries, captured, CONTROLS.length),
-      };
       await window.storage.set(key, JSON.stringify(record), true);
-      // conservar solo los últimos 15 expedientes en este dispositivo
       const res = await window.storage.list("historial:", true);
       const keys = (res?.keys || []).sort();
       while (keys.length > 15) { const old = keys.shift(); try { await window.storage.delete(old, true); } catch {} }
     } catch (err) { console.error("No se pudo guardar en historial", err); }
+    if (SYNC_URL) {
+      try { fetch(SYNC_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ ...record, fotos: (record.fotos || []).length }) }); } catch {}
+    }
   };
 
   const copiarResumen = async () => {
     const txt = buildResumen(meta, today, g, entries, captured, CONTROLS.length);
     try { await navigator.clipboard.writeText(txt); setCopied(true); setTimeout(() => setCopied(false), 2500); }
     catch { window.prompt("Copia el resumen:", txt); }
+  };
+
+  const descargarCSV = () => {
+    const records = [...(hist || [])];
+    if (!meta.firma && captured > 0) {
+      records.unshift({ fecha: today, sucursal: meta.sucursal || "Sucursal", responsable: meta.responsable, puesto: meta.puesto, estado: `${g.estado} (en proceso)`, score: g.score, respuestas: buildRespuestas() });
+    }
+    if (!records.length) { alert("Aún no hay datos para exportar."); return; }
+    exportCSV(records);
   };
 
   const loadHist = async () => {
@@ -528,10 +610,21 @@ function LineCheckApp() {
           <h1 className="font-black tracking-tight" style={{ fontSize: 22 }}>ROCK N&rsquo;WOK</h1>
           <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} className="text-orange-400">{today}</span>
         </div>
-        <p className="uppercase text-stone-400 mt-0.5" style={{ fontSize: 11, letterSpacing: "0.2em" }}>Line Check · Validación de apertura · v1.1</p>
-        <div className="flex gap-2 mt-3">
-          <input value={meta.sucursal} onChange={(e) => setMeta({ ...meta, sucursal: e.target.value })} placeholder="Sucursal" className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-white placeholder-stone-500" style={{ fontSize: 13 }} />
-          <input value={meta.responsable} onChange={(e) => setMeta({ ...meta, responsable: e.target.value })} placeholder="Responsable" className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-white placeholder-stone-500" style={{ fontSize: 13 }} />
+        <p className="uppercase text-stone-400 mt-0.5" style={{ fontSize: 11, letterSpacing: "0.2em" }}>Line Check · Validación de apertura · v1.2</p>
+        <div className="mt-3">
+          <select value={meta.sucursal} onChange={(e) => setMeta({ ...meta, sucursal: e.target.value })}
+            className={`w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 ${meta.sucursal ? "text-white" : "text-stone-500"}`} style={{ fontSize: 14 }}>
+            <option value="">Selecciona la sucursal…</option>
+            {SUCURSALES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div className="flex gap-2 mt-2">
+          <input value={meta.responsable} onChange={(e) => setMeta({ ...meta, responsable: e.target.value })} placeholder="Nombre del responsable" className="flex-1 bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-white placeholder-stone-500" style={{ fontSize: 13 }} />
+          <select value={meta.puesto} onChange={(e) => setMeta({ ...meta, puesto: e.target.value })}
+            className={`w-32 bg-stone-800 border border-stone-700 rounded-lg px-2 py-2 ${meta.puesto ? "text-white" : "text-stone-500"}`} style={{ fontSize: 13 }}>
+            <option value="">Puesto…</option>
+            {PUESTOS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
         </div>
       </div>
 
@@ -550,6 +643,9 @@ function LineCheckApp() {
             <p className="text-stone-500 bg-white rounded-xl p-3 border border-stone-200 mb-3" style={{ fontSize: 12 }}>
               Antecedente de aperturas firmadas en este dispositivo (versión piloto — en producción vive en la base de datos central).
             </p>
+            <button onClick={descargarCSV} className="w-full py-2.5 mb-3 rounded-xl font-bold bg-stone-950 text-white" style={{ fontSize: 14 }}>
+              ⬇ Descargar historial en CSV (Excel)
+            </button>
             {hist === null && <p className="text-stone-400 text-center py-6" style={{ fontSize: 13 }}>Cargando historial…</p>}
             {hist !== null && hist.length === 0 && <p className="text-stone-400 text-center py-6" style={{ fontSize: 13 }}>Aún no hay aperturas firmadas. La primera liberación creará el primer expediente.</p>}
             {hist !== null && hist.map((h, i) => {
@@ -561,7 +657,7 @@ function LineCheckApp() {
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="font-bold text-stone-900" style={{ fontSize: 14 }}>{h.sucursal}</p>
-                        <p className="text-stone-500" style={{ fontFamily: "ui-monospace, monospace", fontSize: 11 }}>{h.fecha} · {h.firma?.nombre} · {h.firma ? new Date(h.firma.ts).toLocaleTimeString() : ""}</p>
+                        <p className="text-stone-500" style={{ fontFamily: "ui-monospace, monospace", fontSize: 11 }}>{h.fecha} · {h.firma?.nombre}{h.puesto ? ` (${h.puesto})` : ""} · {h.firma ? new Date(h.firma.ts).toLocaleTimeString() : ""}</p>
                       </div>
                       <div className="text-right">
                         <span className={`${s.bg} text-white font-bold px-2 py-1 rounded`} style={{ fontSize: 11 }}>{s.icon} {h.score}</span>
@@ -607,6 +703,12 @@ function LineCheckApp() {
               </div>
             </div>
 
+            {!meta.firma && (
+              <button onClick={copiarResumen} className="w-full mt-3 py-2.5 rounded-xl font-bold bg-stone-950 text-white" style={{ fontSize: 14 }}>
+                {copied ? "✓ Copiado — pégalo en el grupo" : "📲 Copiar reporte para WhatsApp (incluye pendientes y observaciones)"}
+              </button>
+            )}
+
             {g.criticalOpen.length > 0 && (
               <div className="bg-white border border-red-300 rounded-xl p-3 mt-3">
                 <p className="font-bold text-red-700" style={{ fontSize: 13 }}>Gates críticos abiertos — bloquean la apertura:</p>
@@ -640,7 +742,7 @@ function LineCheckApp() {
               {meta.firma ? (
                 <div className="text-center">
                   <p className="font-black text-emerald-700" style={{ fontSize: 15 }}>APERTURA LIBERADA</p>
-                  <p style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} className="text-stone-500 mt-1">{meta.firma.nombre} · {new Date(meta.firma.ts).toLocaleString()}</p>
+                  <p style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }} className="text-stone-500 mt-1">{meta.firma.nombre}{meta.puesto ? ` (${meta.puesto})` : ""} · {new Date(meta.firma.ts).toLocaleString()}</p>
                   <button onClick={copiarResumen} className="w-full mt-3 py-2.5 rounded-xl font-bold bg-emerald-600 text-white" style={{ fontSize: 14 }}>
                     {copied ? "✓ Copiado — pégalo en el grupo" : "📲 Copiar resumen para WhatsApp"}
                   </button>
@@ -654,7 +756,7 @@ function LineCheckApp() {
                   </button>
                   {!canSign && (
                     <p className="text-stone-500 text-center mt-2" style={{ fontSize: 12 }}>
-                      {g.estado === "rojo" ? "No se puede liberar en rojo." : g.pendingTotal > 0 ? `Faltan ${g.pendingTotal} controles por capturar.` : commentsMissing ? "Hay incidencias sin acción registrada." : "Escribe el nombre del responsable en el encabezado."}
+                      {!meta.sucursal || !meta.puesto || !meta.responsable.trim() ? "Completa sucursal, responsable y puesto en el encabezado." : g.estado === "rojo" ? "No se puede liberar en rojo. Puedes enviar el reporte preliminar mientras corriges." : g.pendingTotal > 0 ? `Faltan ${g.pendingTotal} controles por capturar.` : commentsMissing ? "Hay incidencias sin acción registrada." : ""}
                     </p>
                   )}
                 </React.Fragment>

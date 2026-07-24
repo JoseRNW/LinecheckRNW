@@ -1,29 +1,49 @@
-# Line Check · Rock n' Wok (v1.1 piloto)
+# Line Check · Rock n' Wok (v1.2 piloto)
 
-App web de validación de apertura de sucursales. Corre en cualquier navegador y se instala en la pantalla de inicio como PWA (sin App Store).
+App web de validación de apertura. Corre en cualquier navegador y se instala en pantalla de inicio como PWA.
 
-## Publicar con GitHub Pages
+## Actualizar la app en GitHub
 
-1. Crea un repositorio nuevo (público) llamado `line-check`.
-2. Sube TODOS los archivos de esta carpeta: `index.html`, `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`, `README.md`.
-3. En el repositorio: **Settings → Pages → Source: Deploy from a branch → Branch: main / (root) → Save**.
-4. Espera 1–2 minutos. Tu app quedará en: `https://TU-USUARIO.github.io/line-check/`
+Reemplaza `index.html` en tu repositorio (o edítalo con el botón de lápiz) → Commit changes. En 1–2 minutos todos los dispositivos reciben la versión nueva al recargar (si no aparece, cierra y vuelve a abrir la app, o borra caché).
 
-## Instalar en el teléfono de la sucursal
+## Novedades v1.2
 
-- **iPhone (Safari):** abrir la URL → botón Compartir → **"Agregar a pantalla de inicio"**.
-- **Android (Chrome):** abrir la URL → menú ⋮ → **"Instalar app"** o "Agregar a pantalla principal".
+- Sucursal y Puesto como listas desplegables (obligatorios para firmar)
+- Congelador: el signo negativo es automático (solo escribe 18 y se registra –18°C)
+- Proteína fría del día: muestra en grande cuál proteína asignó el sistema hoy
+- Arroz al vapor: mínimo 3 recetas
+- Reporte de WhatsApp disponible AUNQUE NO esté liberado (incluye pendientes y observaciones)
+- Descarga del historial en CSV/Excel con cada respuesta, valor, status, comentario y hora
 
-Queda con ícono propio y pantalla completa, como app nativa.
+## Historial compartido entre dispositivos (Google Sheets)
 
-## Actualizar la app
+Para que todo el equipo vea el historial desde cualquier dispositivo, conecta la app a una hoja de Google:
 
-Edita o reemplaza `index.html` en GitHub (botón lápiz o volver a subir el archivo) → Commit. En 1–2 minutos todos los dispositivos reciben la versión nueva al recargar.
+1. Crea una hoja nueva en Google Sheets (por ejemplo "Line Check Historial").
+2. Menú **Extensiones → Apps Script**. Borra el contenido y pega:
+
+```javascript
+function doPost(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Historial") || ss.insertSheet("Historial");
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["Fecha","Sucursal","Responsable","Puesto","Estado","Score","Bloque","Control","Criticidad","Valor","Status","Comentario","Notificar","Hora"]);
+  }
+  var d = JSON.parse(e.postData.contents);
+  (d.respuestas || []).forEach(function(r) {
+    sheet.appendRow([d.fecha, d.sucursal, d.responsable, d.puesto, d.estado, d.score, r.block, r.name, r.crit, r.valor, r.status, r.comment, r.notifica, r.hora]);
+  });
+  return ContentService.createTextOutput("ok");
+}
+```
+
+3. Botón **Implementar → Nueva implementación → Tipo: Aplicación web** → "Quién tiene acceso": **Cualquier persona** → Implementar. Copia la URL que te da (termina en `/exec`).
+4. Abre `index.html`, busca la línea `const SYNC_URL = "";` (está al inicio) y pega la URL entre las comillas. Sube el archivo actualizado a GitHub.
+
+Listo: cada liberación firmada agrega todas sus respuestas a la hoja automáticamente, y cualquier persona con acceso a la hoja ve el historial de todas las sucursales en tiempo real desde cualquier dispositivo.
 
 ## Notas del piloto
 
-- Los datos (capturas, historial y fotos) se guardan **en cada dispositivo** (localStorage). Usa un solo teléfono o tablet designado por sucursal.
-- El historial conserva los últimos 15 expedientes firmados por dispositivo.
-- El reporte al grupo se hace con el botón "Copiar resumen para WhatsApp" tras firmar la liberación.
-- La primera carga requiere internet; después funciona aún con señal intermitente (service worker).
-- En producción (Foodbot) los datos migran a base de datos central con notificaciones automáticas.
+- Sin SYNC_URL, el historial vive solo en cada dispositivo (últimos 15 expedientes). Usa un teléfono designado por sucursal.
+- Las fotos NO viajan a la hoja (solo los datos); las fotos quedan en el dispositivo y en producción irán a la base de datos central.
+- Primera carga requiere internet; después funciona con señal intermitente.
