@@ -532,7 +532,8 @@ function ControlCard({ c, entry, update, assignedItems }) {
 
 /* ============ APP ============ */
 function LineCheckApp() {
-  const today = new Date().toISOString().slice(0, 10);
+ const _hoy = new Date();
+  const today = `${_hoy.getFullYear()}-${String(_hoy.getMonth() + 1).padStart(2, "0")}-${String(_hoy.getDate()).padStart(2, "0")}`;
   const storageKey = `linecheck:${today}`;
   const [entries, setEntries] = useState({});
   const [meta, setMeta] = useState({ sucursal: "", responsable: "", puesto: "", firma: null });
